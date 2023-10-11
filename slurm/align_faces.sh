@@ -15,14 +15,20 @@
 #SBATCH --mail-user=nicolo.didomenico@unibo.it
 #SBATCH --array=0-7
 
+set -e
+
 datasets=("Real/AgeDB" "Real/BUPT-BalancedFace" "Real/CASIA-WebFace" "Real/CFP-FP" "Real/FFHQ" "Real/ROF" "Synth/DCFace" "Synth/GANDiffFace")
 image_size=112
 margin=12
 input="$WORK/frcsyn-datasets/${datasets[$SLURM_ARRAY_TASK_ID]}"
 output="$WORK/frcsyn-datasets-${image_size}-m${margin}-aligned/${datasets[$SLURM_ARRAY_TASK_ID]}"
+
 mkdir -p $output
 
-module load python/3.10.8
+module load profile/deeplrn
+module load cuda/11.8
+module load cudnn/8.4.0.27-11.6--gcc--11.3.0
+module load python/3.10.8--gcc--11.3.0
 
 cd $WORK/frcsyn
 python3 -m venv .venv
