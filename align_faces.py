@@ -122,9 +122,15 @@ def align_face(args: tuple[Path, Path, Path, int, int, bool]) -> bool:
     img = cv.cvtColor(img, cv.COLOR_BGR2RGB)
     img_shape = np.array(img.shape[:2]).astype(np.float32)
     detector = MTCNN(select_largest=False, device="cpu")
-    img_boxes, _, landmarks = detector.detect(img, landmarks=True)
-    if img_boxes is None:
-        logging.warning(f"Could not detect a face in {input_file}, skipping")
+    detect_failure = False
+    try:
+        img_boxes, _, landmarks = detector.detect(img, landmarks=True)
+        if img_boxes is None:
+            detect_failure = True
+    except RuntimeError:
+        detect_failure = True
+    if detect_failure:
+        logging.warning(f"Could not detect any face in {input_file}, skipping")
         return False
     img_boxes = np.asarray(img_boxes, dtype=np.float32)
     img_bbox_idx, img_bbox = select_best_bbox(img_shape, img_boxes)
