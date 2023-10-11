@@ -5,3 +5,5 @@ albumentations --no-binary qudida,albumentations
 torch >=2.0, <2.1
 torchvision >=0.15, <0.16
 lightning >=2.0, <2.1
+deepface
+facenet-pytorch
