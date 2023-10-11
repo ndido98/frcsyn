@@ -36,4 +36,4 @@ if [ ! -d .venv ]; then
 fi
 source .venv/bin/activate
 pip3 install -r requirements.txt
-python3 ./align_faces.py --input "$input" --output "$output" -r -m $margin -s $image_size -a -n 32
+python3 ./align_faces.py --input "$input" --output "$output" -r -m $margin -s $image_size -a -n 0
