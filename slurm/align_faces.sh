@@ -31,7 +31,9 @@ module load cudnn/8.4.0.27-11.6--gcc--11.3.0
 module load python/3.10.8--gcc--11.3.0
 
 cd $WORK/frcsyn
-python3 -m venv .venv
+if [ ! -d .venv ]; then
+    python3 -m venv .venv
+fi
 source .venv/bin/activate
 pip3 install -r requirements.txt
 python3 ./align_faces.py --input "$input" --output "$output" -r -m $margin -s $image_size -a -n 32
