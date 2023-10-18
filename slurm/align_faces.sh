@@ -13,11 +13,12 @@
 #SBATCH --output=slurm_align_faces_%A_%a.out
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=nicolo.didomenico@unibo.it
-#SBATCH --array=0-7
+#SBATCH --array=0-5
 
 set -e
 
-datasets=("Real/AgeDB" "Real/BUPT-BalancedFace" "Real/CASIA-WebFace" "Real/CFP-FP" "Real/FFHQ" "Real/ROF" "Synth/DCFace" "Synth/GANDiffFace")
+# CASIA-WebFace and DCFace are ready to use without any preprocessing
+datasets=("Real/AgeDB" "Real/BUPT-BalancedFace" "Real/CFP-FP" "Real/FFHQ" "Real/ROF" "Synth/GANDiffFace")
 image_size=112
 margin=12
 input="$WORK/frcsyn-datasets/${datasets[$SLURM_ARRAY_TASK_ID]}"
@@ -36,4 +37,4 @@ if [ ! -d .venv ]; then
 fi
 source .venv/bin/activate
 pip3 install -r requirements.txt
-python3 ./align_faces.py --input "$input" --output "$output" -r -m $margin -s $image_size -a -n 0
+python3 ./align_faces.py --input "$input" --output "$output" -r -m $margin -s $image_size -n 0 --allow-no-faces
