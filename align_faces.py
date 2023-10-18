@@ -110,8 +110,8 @@ def get_img_bbox_intersection(img_shape: np.ndarray, bbox: np.ndarray) -> np.nda
     ])
 
 
-def align_face(args: tuple[Path, Path, Path, int, int, bool]) -> bool:
-    input_file, input_root, output_root, margin, size, align = args
+def align_face(args: tuple[Path, Path, Path, int, int, bool, bool]) -> bool:
+    input_file, input_root, output_root, margin, size, allow_no_faces, align = args
     output_file = output_root / input_file.relative_to(input_root)
     if output_file.exists():
         return True
@@ -130,12 +130,16 @@ def align_face(args: tuple[Path, Path, Path, int, int, bool]) -> bool:
     except RuntimeError:
         detect_failure = True
     if detect_failure:
-        logging.warning(f"Could not detect any face in {input_file}, skipping")
-        return False
+        if allow_no_faces:
+            logging.warning(f"Could not detect any face in {input_file}, using the whole image")
+            img_boxes = np.array([[0, 0, img_shape[1], img_shape[0]]], dtype=np.float32)
+        else:
+            logging.warning(f"Could not detect any face in {input_file}, skipping")
+            return False
     img_boxes = np.asarray(img_boxes, dtype=np.float32)
     img_bbox_idx, img_bbox = select_best_bbox(img_shape, img_boxes)
-    img_landmarks = landmarks[img_bbox_idx].astype(np.float32)
     if align:
+        img_landmarks = landmarks[img_bbox_idx].astype(np.float32)
         left_eye, right_eye = img_landmarks[0], img_landmarks[1]
         eye_diff = right_eye - left_eye
         rotation_degrees = np.degrees(np.arctan2(eye_diff[1], eye_diff[0]))
@@ -187,7 +191,7 @@ def align_face(args: tuple[Path, Path, Path, int, int, bool]) -> bool:
     return True
 
 
-def align_faces(input_dir: Path, output_dir: Path, recursive: bool, margin: int, size: int, align: bool, num_workers: int) -> None:
+def align_faces(input_dir: Path, output_dir: Path, recursive: bool, margin: int, size: int, allow_no_faces: bool, align: bool, num_workers: int) -> None:
     logging.info(f"Starting face alignment in {input_dir}")
     if recursive:
         files = multi_rglob(input_dir, ALLOWED_EXTENSIONS)
@@ -196,7 +200,7 @@ def align_faces(input_dir: Path, output_dir: Path, recursive: bool, margin: int,
     logging.info(f"Found {len(files)} images")
     logging.info("Aligning faces...")
     total_success = 0
-    elems = [(file, input_dir, output_dir, margin, size, align) for file in files]
+    elems = [(file, input_dir, output_dir, margin, size, allow_no_faces, align) for file in files]
     if num_workers == 0:
         for elem in tqdm(elems):
             success = align_face(elem)
@@ -252,6 +256,12 @@ if __name__ == "__main__":
         dest="num_workers",
     )
     parser.add_argument(
+        "--allow-no-faces",
+        action="store_true",
+        default=False,
+        help="Whether to allow images with no faces or not",
+    )
+    parser.add_argument(
         "-a", "--align",
         action="store_true",
         default=False,
@@ -264,6 +274,7 @@ if __name__ == "__main__":
         args.recursive,
         args.margin,
         args.image_size,
+        args.allow_no_faces,
         args.align,
         args.num_workers,
     )
