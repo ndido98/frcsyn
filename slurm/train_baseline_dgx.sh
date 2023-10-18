@@ -26,7 +26,7 @@ echo "=== Pulling singularity image ==="
 if [ ! -f pytorch_23.09-py3.sif ]; then
     singularity pull docker://nvcr.io/nvidia/pytorch:23.09-py3
 fi
-singularity exec pytorch_23.09-py3.sif pip install -r $project_dir/requirements.txt
+singularity exec --bind $project_dir:/mnt/frcsyn pytorch_23.09-py3.sif pip install -r /mnt/frcsyn/requirements.txt
 
 echo "=== Copying datasets to $TMPDIR ==="
 mkdir -p $TMPDIR/datasets
