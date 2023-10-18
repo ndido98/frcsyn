@@ -23,7 +23,9 @@ output_dir=$scratch_home/job_$SLURM_JOB_ID
 
 cd $scratch_home
 echo "=== Pulling singularity image ==="
-singularity pull docker://nvcr.io/nvidia/pytorch:23.09-py3
+if [ ! -f pytorch_23.09-py3.sif ]; then
+    singularity pull docker://nvcr.io/nvidia/pytorch:23.09-py3
+fi
 singularity exec pytorch_23.09-py3.sif pip install -r $project_dir/requirements.txt
 
 echo "=== Copying datasets to $TMPDIR ==="
