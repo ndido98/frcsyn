@@ -1,0 +1,32 @@
+seed_everything: 42
+
+data:
+  predict_sets:
+    - root: ${data.datasets.root}/Real/AgeDB-processed/03_Protocol_Images
+      couples_file: ${data.comparison_files.root}/sub-tasks_2.1_2.2/agedb_comparison.txt
+    - root: ${data.datasets.root}/Real/BUPT-BalancedFace-processed/race_per_7000
+      couples_file: ${data.comparison_files.root}/sub-tasks_2.1_2.2/bupt_comparison.txt
+    - root: ${data.datasets.root}/Real/CFP-FP-processed/cfp-dataset/Data/Images
+      couples_file: ${data.comparison_files.root}/sub-tasks_2.1_2.2/cfp-fp_comparison.txt
+    - root: ${data.datasets.root}/Real/ROF-processed
+      couples_file: ${data.comparison_files.root}/sub-tasks_2.1_2.2/rof_comparison.txt
+
+trainer:
+  log_every_n_steps: 100
+  accelerator: gpu
+  logger: false
+  callbacks:
+    - class_path: PredictionWriter
+      init_args:
+        output_dir: ${model.predictions.output_dir}
+        datasets_names:
+          - agedb
+          - bupt
+          - cfp-fp
+          - rof
+        filename: ${model.predictions.filename}
+    - class_path: lightning.pytorch.callbacks.ModelSummary
+      init_args:
+        max_depth: 4
+    - class_path: lightning.pytorch.callbacks.TQDMProgressBar
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
