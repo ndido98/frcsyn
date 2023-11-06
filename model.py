@@ -52,7 +52,7 @@ class Model(pl.LightningModule):
         return self.backbone(x)
 
     def on_train_start(self) -> None:
-        if isinstance(self.logger, pll.WandbLogger):
+        if isinstance(self.logger, pll.WandbLogger) and self.trainer.global_rank == 0:
             self.logger.watch(self, log="all", log_graph=True)
     
     def training_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> torch.Tensor:
@@ -60,7 +60,7 @@ class Model(pl.LightningModule):
         embeddings, norms = self(x)
         cos_thetas = self.head(embeddings, norms, y)
         loss = self.loss(cos_thetas, y)
-        self.log("loss/train", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        self.log("loss/train", loss, on_step=True, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         return loss
     
     def validation_step(self, batch: tuple[torch.Tensor, torch.Tensor, torch.Tensor], batch_idx: int) -> None:
@@ -72,9 +72,9 @@ class Model(pl.LightningModule):
     def on_validation_epoch_end(self) -> None:
         accuracy, best_threshold, all_distances = self.embedding_accuracy.compute()
         self.distance_threshold = best_threshold
-        self.log("accuracy/val", accuracy, on_step=False, on_epoch=True, prog_bar=True, logger=True)
-        self.log("best_threshold/val", best_threshold, on_step=False, on_epoch=True, prog_bar=True, logger=True)
-        if isinstance(self.logger, pll.WandbLogger):
+        self.log("accuracy/val", accuracy, on_step=False, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+        self.log("best_threshold/val", best_threshold, on_step=False, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+        if isinstance(self.logger, pll.WandbLogger) and self.trainer.global_rank == 0:
             distances_list = [[d] for d in all_distances]
             table = wandb.Table(data=distances_list, columns=["distances"])
             self.logger.experiment.log(
