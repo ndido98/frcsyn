@@ -172,12 +172,19 @@ def align_face(args: tuple[Path, Path, Path, int, int, bool, bool]) -> bool:
     else:
         img_bbox[0] -= (img_bbox_size - img_bbox_width) / 2
         img_bbox[2] += (img_bbox_size - img_bbox_width) / 2
-    x1, y1, x2, y2 = np.round(img_bbox).astype(np.int32)
     # Pad the image with black borders so that the bounding box is not out of bounds
-    cropped = np.zeros((y2 - y1, x2 - x1, 3), dtype=img.dtype)
     i_x1, i_y1, i_x2, i_y2 = np.round(get_img_bbox_intersection(img_shape, img_bbox)).astype(np.int32)
     img_roi = img[i_y1:i_y2, i_x1:i_x2]
-    cropped[i_y1 - y1:i_y2 - y1, i_x1 - x1:i_x2 - x1] = img_roi
+    # Make img_roi square if it's not by padding with zeros at both sides
+    img_roi_height, img_roi_width = img_roi.shape[:2]
+    if img_roi_width > img_roi_height:
+        cropped = np.zeros((img_roi_width, img_roi_width, 3), dtype=img.dtype)
+        border = (img_roi_width - img_roi_height) // 2
+        cropped[border:border + img_roi_height, :] = img_roi
+    else:
+        cropped = np.zeros((img_roi_height, img_roi_height, 3), dtype=img.dtype)
+        border = (img_roi_height - img_roi_width) // 2
+        cropped[:, border:border + img_roi_width] = img_roi
     if cropped is None or cropped.shape[0] == 0 or cropped.shape[1] == 0:
         logging.warning(f"Unable to crop {input_file} (bounding box: {img_bbox}, cropped shape: {cropped.shape}), skipping")
         return False
