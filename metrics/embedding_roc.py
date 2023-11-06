@@ -39,20 +39,29 @@ def _calculate_roc(distances: torch.Tensor, is_same: torch.Tensor, n_folds: int)
     thresholds: torch.Tensor = torch.sort(distances).values
     thresholds = torch.cat([thresholds, torch.tensor([thresholds[-1] + 1], device=thresholds.device)])
     n_thresholds = len(thresholds)
-    tprs = torch.zeros(n_folds, n_thresholds, device=distances.device)
-    fprs = torch.zeros(n_folds, n_thresholds, device=distances.device)
+    tprs = torch.zeros(n_thresholds, device=distances.device)
+    fprs = torch.zeros(n_thresholds, device=distances.device)
     accuracies = torch.zeros(n_folds, device=distances.device)
     best_thresholds = torch.zeros(n_folds, device=distances.device)
     for fold_idx, (train_idx, test_idx) in enumerate(kfold_indices(distances, n_folds)):
         _, _, train_accuracies = _compute_tpr_fpr_accuracies(distances[train_idx], thresholds, is_same[train_idx])
         best_threshold_idx = torch.argmax(train_accuracies)
         best_thresholds[fold_idx] = thresholds[best_threshold_idx]
-        tprs[fold_idx, :], fprs[fold_idx, :], _ = _compute_tpr_fpr_accuracies(distances[test_idx], thresholds, is_same[test_idx])
+        fold_tprs, fold_fprs, _ = _compute_tpr_fpr_accuracies(distances[test_idx], thresholds, is_same[test_idx])
+        tprs += fold_tprs
+        fprs += fold_fprs
         _, _, best_threshold_acc = _compute_tpr_fpr_accuracies(distances[test_idx], thresholds[best_threshold_idx], is_same[test_idx])
         accuracies[fold_idx] = best_threshold_acc
-    tpr = tprs.mean(dim=0)
-    fpr = fprs.mean(dim=0)
+    tpr = tprs / n_folds
+    fpr = fprs / n_folds
     return tpr, fpr, accuracies, best_thresholds
+
+
+def _dim_zero_cat(tensors: list[torch.Tensor] | torch.Tensor) -> torch.Tensor:
+    if isinstance(tensors, torch.Tensor):
+        return tensors
+    else:
+        return torch.cat(tensors, dim=0)
 
 
 class EmbeddingAccuracy(tm.Metric):
@@ -75,7 +84,7 @@ class EmbeddingAccuracy(tm.Metric):
         self.is_same.append(is_same)
 
     def compute(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        all_distances: torch.Tensor = torch.cat(self.distances, dim=0)
-        all_is_same: torch.Tensor = torch.cat(self.is_same, dim=0)
+        all_distances = _dim_zero_cat(self.distances)
+        all_is_same = _dim_zero_cat(self.is_same)
         _ , _, accuracies, best_thresholds = _calculate_roc(all_distances, all_is_same, self.n_folds)
         return accuracies.mean(), best_thresholds.mean(), all_distances.flatten()
