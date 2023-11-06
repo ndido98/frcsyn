@@ -24,10 +24,10 @@ def kfold_indices(data: torch.Tensor, folds: int) -> Generator[tuple[torch.Tenso
         current = stop
 
 
-def distance(x1: torch.Tensor, x2: torch.Tensor, distance_fn: Literal["euclidean", "cosine"] = "euclidean") -> torch.Tensor:
+def distance(x1: torch.Tensor, x2: torch.Tensor, distance_fn: Literal["euclidean", "cosine", "dot"] = "euclidean") -> torch.Tensor:
     if distance_fn == "euclidean":
-        return F.pairwise_distance(x1, x2, p=2)
+        return torch.clip(F.pairwise_distance(x1, x2, p=2), min=0)
     elif distance_fn == "cosine":
-        return 1 - F.cosine_similarity(x1, x2)
+        return torch.clip(1 - F.cosine_similarity(x1, x2), min=0, max=2)
     else:
         raise ValueError(f"Unknown distance function: {distance_fn}")
