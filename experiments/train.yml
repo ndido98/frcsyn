@@ -1,30 +1,33 @@
 seed_everything: 42
 
+data:
+  val_n_classes: 100
+  max_matches_per_image: 5
+  max_nonmatches_per_image: 5
+  augment: true
+  num_workers: 4
+
 trainer:
   log_every_n_steps: 100
   accelerator: gpu
   num_nodes: 1
-  devices: auto
-  strategy: ddp
   logger:
     class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
       project: frcsyn
       log_model: true
-      save_dir: ${model.temp_dir}/logger
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
         monitor: accuracy/val
         mode: max
         filename: "epoch={epoch}-acc_val={accuracy/val:.4f}-thr={best_threshold/val:.4f}"
-        dirpath: ${model.temp_dir}/checkpoints
         auto_insert_metric_name: false
     - class_path: lightning.pytorch.callbacks.EarlyStopping
       init_args:
         monitor: accuracy/val
         mode: max
-        patience: 5
+        patience: 10
     - class_path: lightning.pytorch.callbacks.ModelSummary
       init_args:
         max_depth: 4
