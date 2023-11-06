@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 import random
 
 import cv2
-from lightning.pytorch.utilities.types import EVAL_DATALOADERS
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
 import lightning.pytorch as pl
@@ -99,7 +97,7 @@ class JointFaceClassificationDataset(FaceClassificationDataset):
         return file, shifted_class
 
 
-class FaceCouplesDataset(Dataset):
+class FaceCouplesDataset(FaceClassificationDataset):
     def __init__(
         self,
         root_dir: Path,
@@ -120,6 +118,7 @@ class FaceCouplesDataset(Dataset):
             classes = all_classes[from_class:]
         else:
             classes = all_classes[from_class:to_class]
+        self._n_classes = len(classes)
         files: dict[str, list[Path]] = {}
         for klass in classes:
             class_dir = root_dir / str(klass)
@@ -152,7 +151,12 @@ class FaceCouplesDataset(Dataset):
                         non_matching_couples.add(couple)
                         non_matches += 1
         couples = list(matching_couples) + list(non_matching_couples)
+        random.shuffle(couples)
         self.couples = SupervisedCoupleArray(couples)
+    
+    @property
+    def n_classes(self) -> int:
+        return self._n_classes
 
     def __len__(self) -> int:
         return len(self.couples)
@@ -165,6 +169,25 @@ class FaceCouplesDataset(Dataset):
             result = self.transform(image=img1, image2=img2)
             img1, img2 = result["image"], result["image2"]
         return img1, img2, is_same
+
+
+class JointFaceCouplesDataset(FaceClassificationDataset):
+    def __init__(self, datasets: list[FaceCouplesDataset]) -> None:
+        self.datasets = datasets
+        self.datasets_lengths = [len(d) for d in self.datasets]
+
+    @property
+    def n_classes(self) -> int:
+        return sum(d.n_classes for d in self.datasets)
+
+    def __len__(self) -> int:
+        return sum(self.datasets_lengths)
+    
+    def __getitem__(self, idx: int) -> tuple[np.ndarray, np.ndarray]:
+        dataset_idx = np.searchsorted(np.cumsum(self.datasets_lengths), idx, side="right")
+        sample_idx = idx - sum(self.datasets_lengths[:dataset_idx])
+        file1, file2, is_same = self.datasets[dataset_idx][sample_idx]
+        return file1, file2, is_same
 
 
 class CouplesFileDataset(Dataset):
@@ -189,21 +212,14 @@ class CouplesFileDataset(Dataset):
         return img1, img2
 
 
-@dataclass
-class PredictDataset:
-    root: str
-    couples_file: str
-
-
 class DataModule(pl.LightningDataModule):
     def __init__(
         self,
         batch_size: int,
-        casia_root: Path,
-        extra_training_sets: list[Path] | None = None,
-        predict_sets: list[PredictDataset] | None = None,
-        casia_train: bool = True,
-        casia_val_n_classes: int = 200,
+        datasets_root: str,
+        include_real_training: bool,
+        include_synth_training: bool,
+        val_n_classes: int = 200,
         max_matches_per_image: int = 3,
         max_nonmatches_per_image: int = 3,
         augment: bool = False,
@@ -212,46 +228,97 @@ class DataModule(pl.LightningDataModule):
         super().__init__()
         self.save_hyperparameters()
         self.batch_size = batch_size
-        self.casia_root = casia_root
-        self.extra_training_sets = extra_training_sets if extra_training_sets is not None else []
-        self.predict_sets = predict_sets if predict_sets is not None else []
-        self.casia_train = casia_train
-        self.casia_val_n_classes = casia_val_n_classes
+        self.datasets_root = Path(datasets_root)
+        self.include_real_training = include_real_training
+        self.include_synth_training = include_synth_training
+        self.val_n_classes = val_n_classes
         self.max_matches_per_image = max_matches_per_image
         self.max_nonmatches_per_image = max_nonmatches_per_image
         self.augment = augment
         self.num_workers = num_workers
 
     def setup(self, stage: str) -> None:
+        ethnicities = ["Asian", "Black", "Indian", "Other", "White"]
+        genders = ["Female", "Male"]
+        dcface_root = self.datasets_root / "Synth" / "DCFace" / "dcface_wacv" / "organized"
+        dcface_dirs = [
+            dcface_root / ethnicity / gender
+            for ethnicity in ethnicities
+            for gender in genders
+        ]
+        gandiffface_root = self.datasets_root / "Synth" / "GANDiffFace-processed"
+        gandiffface_dirs = [
+            gandiffface_root / f"{ethnicity}_{gender}"
+            for ethnicity in ethnicities
+            for gender in genders
+        ]
         base_transform = A.Compose([
             A.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5), max_pixel_value=1.0),
             APT.ToTensorV2(),
         ], additional_targets={"image2": "image"})
         if self.augment:
             train_transform = A.Compose([
-                A.HorizontalFlip(p=0.2),
+                A.HorizontalFlip(p=0.5),
                 A.RandomResizedCrop(112, 112, scale=(0.2, 1.0), ratio=(0.75, 1.333), p=0.2),
                 A.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.5, hue=0, p=0.2),
+                A.Compose([
+                    A.RandomScale(scale_limit=(0, 0.8), interpolation=cv2.INTER_CUBIC, p=1),
+                    A.Resize(112, 112, interpolation=cv2.INTER_AREA, p=1),
+                ], p=0.2),
                 base_transform,
             ], additional_targets={"image2": "image"})
         else:
             train_transform = base_transform
         train_datasets = []
-        if self.casia_train:
-            train_datasets.append(SingleFaceClassificationDataset(self.casia_root, from_class=self.casia_val_n_classes, transform=train_transform))
-        for ts in self.extra_training_sets:
-            train_datasets.append(SingleFaceClassificationDataset(ts, transform=train_transform))
+        casia_root = self.datasets_root / "Real" / "CASIA-WebFace" / "imgs"
+        if self.include_real_training:
+            train_datasets.append(SingleFaceClassificationDataset(casia_root, from_class=self.val_n_classes, transform=train_transform))
+        if self.include_synth_training:
+            for ts in dcface_dirs + gandiffface_dirs:
+                train_datasets.append(SingleFaceClassificationDataset(ts, transform=train_transform, from_class=self.val_n_classes // 24))
         self.train_dataset = JointFaceClassificationDataset(train_datasets)
-        self.val_dataset = FaceCouplesDataset(
-            self.casia_root,
-            to_class=self.casia_val_n_classes,
-            max_matches_per_image=self.max_matches_per_image,
-            max_nonmatches_per_image=self.max_nonmatches_per_image,
-            transform=base_transform,
-        )
+        if self.include_real_training:
+            self.val_dataset = FaceCouplesDataset(
+                casia_root,
+                to_class=self.val_n_classes,
+                max_matches_per_image=self.max_matches_per_image,
+                max_nonmatches_per_image=self.max_nonmatches_per_image,
+                transform=base_transform,
+            )
+        elif self.include_synth_training:
+            val_datasets = []
+            for ts in dcface_dirs + gandiffface_dirs:
+                val_datasets.append(
+                    FaceCouplesDataset(
+                        ts,
+                        to_class=self.val_n_classes // 24,
+                        max_matches_per_image=self.max_matches_per_image,
+                        max_nonmatches_per_image=self.max_nonmatches_per_image,
+                        transform=base_transform,
+                    )
+                )
+            self.val_dataset = JointFaceCouplesDataset(val_datasets)
+        predict_sets = [
+            (
+                self.datasets_root / "comparison_files" / "sub-tasks_2.1_2.2" / "agedb_comparison.txt",
+                self.datasets_root / "Real" / "AgeDB-processed" / "03_Protocol_Images",
+            ),
+            (
+                self.datasets_root / "comparison_files" / "sub-tasks_2.1_2.2" / "bupt_comparison.txt",
+                self.datasets_root / "Real" / "BUPT-BalancedFace-processed" / "race_per_7000",
+            ),
+            (
+                self.datasets_root / "comparison_files" / "sub-tasks_2.1_2.2" / "cfp-fp_comparison.txt",
+                self.datasets_root / "Real" / "CFP-FP-processed" / "cfp-dataset" / "Data" / "Images",
+            ),
+            (
+                self.datasets_root / "comparison_files" / "sub-tasks_2.1_2.2" / "rof_comparison.txt",
+                self.datasets_root / "Real" / "ROF-processed",
+            ),
+        ]
         self.predict_datasets = []
-        for ps in self.predict_sets:
-            self.predict_datasets.append(CouplesFileDataset(Path(ps.root), Path(ps.couples_file), transform=base_transform))
+        for couples_file, root in predict_sets:
+            self.predict_datasets.append(CouplesFileDataset(Path(root), Path(couples_file), transform=base_transform))
     
     def train_dataloader(self) -> DataLoader:
         return DataLoader(
